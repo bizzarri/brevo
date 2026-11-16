@@ -1,0 +1,17 @@
+{
+  "label": "Amador Democrats",
+  "api_key": "",
+  "sender": {
+    "name": "Amador Democrats",
+    "email": "sender@example.org"
+  },
+  "reply_to": "reply@example.org",
+  "test_email": "president@example.org",
+  "lists": {
+    "201": "Amador newsletter",
+    "202": "Amador volunteers"
+  },
+  "templates": {
+    "123": "Amador newsletter template"
+  }
+}
