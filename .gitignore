@@ -1,0 +1,9 @@
+*.json
+!club-mail.example.json
+*.exe
+*.pfx
+*.p12
+*.key
+*.pem
+.env
+.env.*
