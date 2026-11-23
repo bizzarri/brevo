@@ -49,6 +49,9 @@ func TestMeetingPacket(t *testing.T) {
 							t.Errorf("expected one private recipient per message: %+v", v)
 							continue
 						}
+						if v.To[0].Name == "" {
+							t.Errorf("recipient %s is missing a display name", v.To[0].Email)
+						}
 						got = append(got, v.To[0].Email)
 						ids = append(ids, v.To[0].Email)
 					}

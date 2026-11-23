@@ -71,7 +71,7 @@ func (c brevoClient) sendPacket(ctx context.Context, p profile, d draft, content
 	if len(files) == 0 || content == "" {
 		return result, fmt.Errorf("preview a meeting packet with attachments first")
 	}
-	versions := []packetVersion{{To: []sender{{Email: p.TestEmail}}}}
+	versions := []packetVersion{{To: []sender{{Name: p.TestEmail, Email: p.TestEmail}}}}
 	if !test {
 		contacts, err := c.listContacts(ctx, p.APIKey, d.ListID)
 		if err != nil {
@@ -91,7 +91,11 @@ func (c brevoClient) sendPacket(ctx context.Context, p profile, d draft, content
 				continue
 			}
 			excluded[key] = true
-			versions = append(versions, packetVersion{To: []sender{{Name: contact.name(), Email: contact.Email}}})
+			name := contact.name()
+			if name == "" {
+				name = contact.Email
+			}
+			versions = append(versions, packetVersion{To: []sender{{Name: name, Email: contact.Email}}})
 		}
 	}
 	result.total = len(versions)
