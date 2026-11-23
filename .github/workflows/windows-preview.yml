@@ -1,0 +1,22 @@
+name: Build Windows packet preview
+on: push
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - run: go test ./...
+      - run: go build -trimpath -ldflags="-H windowsgui" -o Brevo-Club-Mail.exe .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Brevo-Club-Mail-v0.6.0-meeting-packets-recipient-fix-unsigned
+          path: |
+            Brevo-Club-Mail.exe
+            README.txt
+            club-mail.example.json
