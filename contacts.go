@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"slices"
 	"strconv"
+	"strings"
 )
 
 type listContact struct {
@@ -73,4 +74,38 @@ func (c brevoClient) changeContact(ctx context.Context, key, email string, listI
 		return fmt.Errorf("unknown contact action")
 	}
 	return c.request(ctx, key, http.MethodPut, endpoint, payload, nil)
+}
+
+func (c listContact) name() string {
+	first, _ := c.Attributes["FIRSTNAME"].(string)
+	last, _ := c.Attributes["LASTNAME"].(string)
+	return strings.TrimSpace(first + " " + last)
+}
+
+func (c brevoClient) searchListContacts(ctx context.Context, key string, listID int64, query string) ([]listContact, error) {
+	const pageSize = 500
+	terms := strings.Fields(strings.ToLower(query))
+	var matches []listContact
+	for offset := 0; ; {
+		var page struct {
+			Contacts []listContact
+		}
+		endpoint := fmt.Sprintf("contacts/lists/%d/contacts?limit=%d&offset=%d", listID, pageSize, offset)
+		if err := c.request(ctx, key, http.MethodGet, endpoint, nil, &page); err != nil {
+			return nil, err
+		}
+		for _, contact := range page.Contacts {
+			name := strings.ToLower(contact.name())
+			if contact.Email != "" && slices.IndexFunc(terms, func(term string) bool {
+				return !strings.Contains(name, term)
+			}) == -1 {
+				matches = append(matches, contact)
+			}
+		}
+		if len(page.Contacts) < pageSize {
+			break
+		}
+		offset += len(page.Contacts)
+	}
+	return matches, nil
 }

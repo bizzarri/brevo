@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -66,5 +67,31 @@ func TestContactLookup(t *testing.T) {
 	}
 	if _, err := client.findContact(context.Background(), "test-key", "forbidden@example.org"); err == nil {
 		t.Fatal("expected a permissions error")
+	}
+}
+
+func TestSearchListContacts(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/contacts/lists/7/contacts" || r.URL.Query().Get("limit") != "500" {
+			t.Errorf("unexpected search URL: %s", r.URL)
+		}
+		var contacts []listContact
+		switch r.URL.Query().Get("offset") {
+		case "0":
+			contacts = make([]listContact, 500)
+			contacts[0] = listContact{Email: "other@example.org", Attributes: map[string]any{"FIRSTNAME": "Alice", "LASTNAME": "Jones"}}
+		case "500":
+			contacts = []listContact{{Email: "match@example.org", EmailBlacklisted: true,
+				Attributes: map[string]any{"FIRSTNAME": "Alice", "LASTNAME": "Martin"}}}
+		default:
+			t.Errorf("unexpected page: %s", r.URL)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"contacts": contacts})
+	}))
+	defer server.Close()
+	client := brevoClient{base: server.URL + "/", http: server.Client()}
+	matches, err := client.searchListContacts(context.Background(), "test-key", 7, " mar  ALI ")
+	if err != nil || len(matches) != 1 || matches[0].Email != "match@example.org" || !matches[0].EmailBlacklisted {
+		t.Fatalf("unexpected matches: %+v, %v", matches, err)
 	}
 }

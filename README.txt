@@ -64,8 +64,9 @@ Managing mailing lists
 ----------------------
 
 Click Manage mailing lists, choose an account profile and mailing
-list, then enter an email address and click Look up. The result shows
-the contact's name, list membership, and email subscription status.
+list. Enter part of a name and click Search names, then select a
+match. You can also enter an exact email address and click Look up.
+The contact details show list membership and email subscription status.
 
 Add to list creates the contact if needed. Remove from list removes
 only the selected membership. Unsubscribe email keeps the contact on
