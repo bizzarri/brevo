@@ -1,0 +1,70 @@
+package main
+
+import (
+	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+)
+
+func TestContactChangesPreserveOtherSubscriptions(t *testing.T) {
+	for _, tc := range []struct {
+		name                      string
+		action                    contactAction
+		contact                   listContact
+		method, path, query, body string
+	}{
+		{"create", addContact, listContact{}, "POST", "/contacts", "", `{"email":"member@example.org","listIds":[7]}`},
+		{"add existing", addContact, listContact{ID: 42, EmailBlacklisted: true}, "PUT", "/contacts/42", "identifierType=contact_id", `{"listIds":[7]}`},
+		{"remove membership", removeContact, listContact{ID: 42}, "PUT", "/contacts/42", "identifierType=contact_id", `{"unlinkListIds":[7]}`},
+		{"unsubscribe and retain lists", unsubscribeContact, listContact{ID: 42}, "PUT", "/contacts/42", "identifierType=contact_id", `{"emailBlacklisted":true}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				raw, err := io.ReadAll(r.Body)
+				if err != nil {
+					t.Error(err)
+				}
+				if r.Method != tc.method || r.URL.Path != tc.path || r.URL.RawQuery != tc.query || string(raw) != tc.body {
+					t.Errorf("unexpected request: %s %s %s", r.Method, r.URL, raw)
+				}
+				w.WriteHeader(http.StatusNoContent)
+			}))
+			defer server.Close()
+			client := brevoClient{base: server.URL + "/", http: server.Client()}
+			if err := client.changeContact(context.Background(), "test-key", "member@example.org", 7, tc.action, tc.contact); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestContactLookup(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("identifierType") != "email_id" {
+			t.Errorf("expected email identifier, got %s", r.URL)
+		}
+		switch r.URL.Path {
+		case "/contacts/member+club@example.org":
+			_, _ = io.WriteString(w, `{"id":42,"email":"member+club@example.org","listIds":[9],"listUnsubscribed":[7],"emailBlacklisted":true}`)
+		case "/contacts/missing@example.org":
+			w.WriteHeader(http.StatusNotFound)
+		default:
+			w.WriteHeader(http.StatusForbidden)
+		}
+	}))
+	defer server.Close()
+	client := brevoClient{base: server.URL + "/", http: server.Client()}
+	found, err := client.findContact(context.Background(), "test-key", "member+club@example.org")
+	if err != nil || found.ID != 42 || !found.onList(7) || !found.onList(9) || found.onList(8) || !found.EmailBlacklisted {
+		t.Fatalf("unexpected lookup: %+v, %v", found, err)
+	}
+	missing, err := client.findContact(context.Background(), "test-key", "missing@example.org")
+	if err != nil || missing.ID != 0 {
+		t.Fatalf("expected missing contact, got %+v, %v", missing, err)
+	}
+	if _, err := client.findContact(context.Background(), "test-key", "forbidden@example.org"); err == nil {
+		t.Fatal("expected a permissions error")
+	}
+}

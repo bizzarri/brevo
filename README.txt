@@ -60,6 +60,21 @@ contains only the approved Amador lists. Your CalDC profile and key
 can stay on your own PC. The profile's api_key can be replaced by
 api_key_env, the name of a Windows environment variable holding the key.
 
+Managing mailing lists
+----------------------
+
+Click Manage mailing lists, choose an account profile and mailing
+list, then enter an email address and click Look up. The result shows
+the contact's name, list membership, and email subscription status.
+
+Add to list creates the contact if needed. Remove from list removes
+only the selected membership. Unsubscribe email keeps the contact on
+their lists and blocks email campaigns across that Brevo account.
+Adding an existing contact does not clear their email blocklist status.
+
+Use a Brevo API key that can read contacts for lookup and create or
+update contacts for list changes.
+
 Building from source
 --------------------
 

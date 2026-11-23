@@ -90,6 +90,7 @@ type previewOutcome struct {
 }
 
 type application struct {
+	contactsUI
 	previewDir, previewHTML, previewFile                                                   string
 	previewDone                                                                            chan previewOutcome
 	window, font                                                                           uintptr
@@ -173,6 +174,7 @@ func (a *application) init() {
 	a.back = a.control("BUTTON", "Edit", wsTab, 0, backID)
 	a.view = a.control("BUTTON", "View HTML", wsTab, 0, viewID)
 	a.status = a.control("EDIT", "", wsTab|0x00200844, 0x200, 0)
+	a.initContacts()
 	a.scanProfiles()
 	a.layout()
 }
@@ -192,15 +194,17 @@ func (a *application) layout() {
 	set(a.profileLabel, x, 10, width-32, 34)
 	set(a.profiles, x, 46, width-252, 280)
 	set(a.reload, width-226, 45, 210, 40)
-	set(a.audienceLabel, x, 91, half, 34)
-	set(a.templateLabel, x+half+16, 91, half, 34)
-	set(a.lists, x, 127, half, 250)
-	set(a.templates, x+half+16, 127, half, 250)
-	set(a.subjectLabel, x, 172, width-32, 34)
-	set(a.subject, x, 208, width-32, 40)
-	set(a.bodyLabel, x, 254, width-32, 34)
-	buttonsY := max(370, height-160)
-	set(a.body, x, 290, width-32, buttonsY-302)
+	a.layoutContacts(set, width, height)
+	y := 49
+	set(a.audienceLabel, x, 91+y, half, 34)
+	set(a.templateLabel, x+half+16, 91+y, half, 34)
+	set(a.lists, x, 127+y, half, 250)
+	set(a.templates, x+half+16, 127+y, half, 250)
+	set(a.subjectLabel, x, 172+y, width-32, 34)
+	set(a.subject, x, 208+y, width-32, 40)
+	set(a.bodyLabel, x, 254+y, width-32, 34)
+	buttonsY := max(370+y, height-160)
+	set(a.body, x, 290+y, width-32, buttonsY-302-y)
 	buttonWidth := min(195, (width-68)/4)
 	set(a.preview, width-211, buttonsY, 195, 43)
 	set(a.dispatch, width-16-buttonWidth, buttonsY, buttonWidth, 43)
@@ -216,7 +220,11 @@ func (a *application) update() {
 		hwnd    uintptr
 		visible bool
 	}{
-		{a.preview, !review}, {a.back, review}, {a.test, review}, {a.dispatch, review}, {a.view, review},
+		{a.preview, !review && !a.managing}, {a.back, review && !a.managing},
+		{a.test, review && !a.managing}, {a.dispatch, review && !a.managing}, {a.view, review && !a.managing},
+		{a.audienceLabel, !a.managing}, {a.lists, !a.managing}, {a.templateLabel, !a.managing},
+		{a.templates, !a.managing}, {a.subjectLabel, !a.managing}, {a.subject, !a.managing},
+		{a.bodyLabel, !a.managing}, {a.body, !a.managing}, {a.status, !a.managing},
 	} {
 		var state uintptr
 		if item.visible {
@@ -243,12 +251,15 @@ func (a *application) update() {
 	}
 	send.Call(a.subject, 0xcf, readonly, 0)
 	send.Call(a.body, 0xcf, readonly, 0)
+	a.updateContacts()
 }
 
 func (a *application) scanProfiles() {
 	oldPath := a.path
 	a.path = ""
 	a.files = nil
+	a.ids = nil
+	a.resetContactLists()
 	send.Call(a.profiles, cbReset, 0, 0)
 	send.Call(a.lists, cbReset, 0, 0)
 	send.Call(a.templates, cbReset, 0, 0)
@@ -294,6 +305,7 @@ func (a *application) openProfile() {
 	a.profile = profile{}
 	a.ids, a.templateIDs = nil, nil
 	if err != nil {
+		a.resetContactLists()
 		caption(a.status, "Profile: "+err.Error())
 		a.update()
 		return
@@ -320,6 +332,7 @@ func (a *application) openProfile() {
 	if len(a.templateIDs) == 1 || len(p.Templates) == 1 {
 		send.Call(a.templates, cbSet, 0, 0)
 	}
+	a.resetContactLists()
 	caption(a.status, p.Label+"   |   From "+p.Sender.Email)
 	a.update()
 }
@@ -488,6 +501,7 @@ func windowProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 	case wmCommand:
 		id, notification := wParam&0xffff, (wParam>>16)&0xffff
 		switch {
+		case app.contactCommand(id, notification):
 		case id == profilesID && notification == 1 && !app.busy && app.review == nil:
 			app.openProfile()
 		case id == reloadID && !app.busy && app.review == nil:
@@ -505,6 +519,8 @@ func windowProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 		case id == backID && app.review != nil && !app.busy:
 			app.edit()
 		}
+	case wmContactResult:
+		app.finishContact(<-app.contactDone)
 	case wmPreview:
 		app.showReview(<-app.previewDone)
 	case wmResult:
