@@ -64,7 +64,7 @@ Managing mailing lists
 ----------------------
 
 Click Manage mailing lists, choose an account profile and mailing
-list. Enter part of a name and click Search names, then select a
+list. Enter part of a name and click Search, then select a
 match. You can also enter an exact email address and click Look up.
 The contact details show list membership and email subscription status.
 

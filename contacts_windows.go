@@ -50,7 +50,7 @@ func (a *application) initContacts() {
 	a.emailLabel = a.control("STATIC", "Contact name or email address", 0, 0, 0)
 	a.emailField = a.control("EDIT", "", wsTab|0x80, 0x200, contactEmailID)
 	send.Call(a.emailField, 0xc5, 254, 0)
-	a.search = a.control("BUTTON", "Search names", wsTab, 0, searchContactsID)
+	a.search = a.control("BUTTON", "Search", wsTab, 0, searchContactsID)
 	a.matchesList = a.control("LISTBOX", "Matching contacts", wsTab|0x00200101, 0x200, contactMatchesID)
 	a.find = a.control("BUTTON", "Look up", wsTab, 0, findContactID)
 	a.addMember = a.control("BUTTON", "Add to list", wsTab, 0, addContactID)
