@@ -3,38 +3,62 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"io"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 )
 
-func TestCampaignAttachment(t *testing.T) {
-	const attachment = "https://example.org/agenda.pdf?token=test"
-	p := profile{Label: "Club", Footer: "Footer", Lists: map[string]string{"7": "Club"}}
+func TestMeetingPacket(t *testing.T) {
 	for _, tc := range []struct {
-		name, url, sendPath string
-		test                bool
+		name string
+		test bool
+		want []string
 	}{
-		{"test with attachment", attachment, "/emailCampaigns/42/sendTest", true},
-		{"campaign with attachment", attachment, "/emailCampaigns/42/sendNow", false},
-		{"campaign without attachment", "", "/emailCampaigns/42/sendNow", false},
+		{"test goes only to the test address", true, []string{"test@example.org"}},
+		{"packet excludes opt-outs and duplicates", false, []string{"member@example.org", "second@example.org"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			files := []packetFile{{Name: "agenda.pdf", Data: []byte("agenda")}, {Name: "minutes.pdf", Data: []byte("minutes")}}
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch r.URL.Path {
-				case "/emailCampaigns":
-					var payload map[string]any
+				case "/contacts/lists/7/contacts":
+					if tc.test {
+						t.Error("test send read the club roster")
+					}
+					fmt.Fprint(w, `{"contacts":[
+						{"email":"member@example.org"},
+						{"email":"MEMBER@example.org"},
+						{"email":"blocked@example.org","emailBlacklisted":true},
+						{"email":"unsubscribed@example.org","listUnsubscribed":[7]},
+						{"email":"second@example.org","listUnsubscribed":[8]}
+					]}`)
+				case "/smtp/email":
+					var payload struct {
+						Attachment      []packetFile
+						MessageVersions []packetVersion
+						To, CC, BCC     []sender
+					}
 					if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 						t.Error(err)
 					}
-					got, present := payload["attachmentUrl"]
-					if present != (tc.url != "") || present && got != tc.url {
-						t.Errorf("unexpected attachment: %v (present: %v)", got, present)
+					var got, ids []string
+					for _, v := range payload.MessageVersions {
+						if len(v.To) != 1 {
+							t.Errorf("expected one private recipient per message: %+v", v)
+							continue
+						}
+						got = append(got, v.To[0].Email)
+						ids = append(ids, v.To[0].Email)
 					}
-					_, _ = io.WriteString(w, `{"id":42}`)
-				case tc.sendPath:
-					w.WriteHeader(http.StatusNoContent)
+					if !reflect.DeepEqual(got, tc.want) || len(payload.To)+len(payload.CC)+len(payload.BCC) != 0 {
+						t.Errorf("unexpected recipients: %v", got)
+					}
+					if !reflect.DeepEqual(payload.Attachment, files) {
+						t.Errorf("unexpected attachments: %+v", payload.Attachment)
+					}
+					_ = json.NewEncoder(w).Encode(map[string][]string{"messageIds": ids})
 				default:
 					t.Errorf("unexpected request: %s", r.URL)
 					w.WriteHeader(http.StatusNotFound)
@@ -42,9 +66,11 @@ func TestCampaignAttachment(t *testing.T) {
 			}))
 			defer server.Close()
 			client := brevoClient{base: server.URL + "/", http: server.Client()}
-			d := draft{ListID: "7", Subject: "Agenda", Body: "Meeting agenda", AttachmentURL: tc.url}
-			if id, err := client.submit(context.Background(), p, d, "<p>Meeting agenda</p>", tc.test); err != nil || id != 42 {
-				t.Fatalf("submit returned %d, %v", id, err)
+			p := profile{Label: "Club", Footer: "Club", Lists: map[string]string{"7": "Club"}, TestEmail: "test@example.org"}
+			d := draft{ListID: "7", Subject: "Agenda", Body: "Meeting agenda"}
+			result, err := client.sendPacket(context.Background(), p, d, "<p>Meeting agenda</p>", files, tc.test)
+			if err != nil || result.accepted != len(tc.want) || result.total != len(tc.want) || !result.started {
+				t.Fatalf("send returned %+v, %v", result, err)
 			}
 		})
 	}

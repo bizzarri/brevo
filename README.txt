@@ -60,15 +60,22 @@ contains only the approved Amador lists. Your CalDC profile and key
 can stay on your own PC. The profile's api_key can be replaced by
 api_key_env, the name of a Windows environment variable holding the key.
 
-Attaching a file
-----------------
+Sending a meeting packet
+------------------------
 
-Paste a direct HTTP or HTTPS file URL into Attachment URL before you
-preview. Brevo must be able to fetch the file without signing in.
-The same attachment is included when sending a test or a campaign.
-Brevo allows one attachment up to 4 MB and fewer than 5,000 campaign
-recipients when an attachment is used. Leave the field blank for
-email without an attachment.
+For member notices such as agendas and minutes, click Attach files
+and select all the local files for the packet. Use Ctrl or Shift to
+select multiple files in the picker. Files are limited to 12 MB
+combined. Click Clear to return to the regular campaign workflow.
+
+Preview the email and click Send test. After Brevo accepts the test,
+check that all your attachments arrived, then click Send packet.
+The app sends a separate message to each eligible member, skipping
+Brevo contacts who are email-blocklisted or have opted out of the
+selected list. Brevo also applies its transactional blocklist.
+Your profile key needs permission to read contacts and send
+transactional email. Check Brevo's transactional logs before retrying
+if a packet send could only be partially confirmed.
 
 Managing mailing lists
 ----------------------

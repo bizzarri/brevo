@@ -81,6 +81,7 @@ type outcome struct {
 	attempt attempt
 	id      int64
 	err     error
+	packet  packetResult
 }
 
 type previewOutcome struct {
@@ -90,7 +91,9 @@ type previewOutcome struct {
 }
 
 type application struct {
-	attachmentLabel, attachmentURL uintptr
+	attachmentLabel, attachmentURL, attachFiles, clearFiles uintptr
+	packetFiles                                             []packetFile
+	packetDigest                                            [32]byte
 	contactsUI
 	previewDir, previewHTML, previewFile                                                   string
 	previewDone                                                                            chan previewOutcome
@@ -166,9 +169,10 @@ func (a *application) init() {
 	a.templates = a.control("COMBOBOX", "", wsTab|0x00200003, 0, 0)
 	a.subjectLabel = a.control("STATIC", "Subject", 0, 0, 0)
 	a.subject = a.control("EDIT", "", wsTab|0x80, 0x200, 0)
-	a.attachmentLabel = a.control("STATIC", "Attachment URL", 0, 0, 0)
-	a.attachmentURL = a.control("EDIT", "", wsTab|0x80, 0x200, 0)
-	send.Call(a.attachmentURL, 0xc5, 8192, 0)
+	a.attachmentLabel = a.control("STATIC", "Files", 0, 0, 0)
+	a.attachmentURL = a.control("EDIT", "", wsTab|0x880, 0x200, 0)
+	a.attachFiles = a.control("BUTTON", "Attach files", wsTab, 0, attachFilesID)
+	a.clearFiles = a.control("BUTTON", "Clear", wsTab, 0, clearFilesID)
 	a.bodyLabel = a.control("STATIC", "Message", 0, 0, 0)
 	a.body = a.control("EDIT", "", wsTab|0x00201044, 0x200, 0)
 	send.Call(a.body, 0xc5, 40000, 0)
@@ -206,8 +210,10 @@ func (a *application) layout() {
 	set(a.templates, x+half+16, 127+y, half, 250)
 	set(a.subjectLabel, x, 172+y, width-32, 34)
 	set(a.subject, x, 208+y, width-32, 40)
-	set(a.attachmentLabel, x, 258+y, 200, 34)
-	set(a.attachmentURL, x+202, 254+y, width-234, 40)
+	set(a.attachmentLabel, x, 258+y, 60, 34)
+	set(a.attachmentURL, x+64, 254+y, width-366, 40)
+	set(a.attachFiles, width-286, 254+y, 160, 40)
+	set(a.clearFiles, width-116, 254+y, 100, 40)
 	set(a.bodyLabel, x, 299+y, width-32, 34)
 	buttonsY := max(415+y, height-160)
 	set(a.body, x, 335+y, width-32, buttonsY-347-y)
@@ -231,6 +237,7 @@ func (a *application) update() {
 		{a.audienceLabel, !a.managing}, {a.lists, !a.managing}, {a.templateLabel, !a.managing},
 		{a.templates, !a.managing}, {a.subjectLabel, !a.managing}, {a.subject, !a.managing},
 		{a.attachmentLabel, !a.managing}, {a.attachmentURL, !a.managing},
+		{a.attachFiles, !a.managing && !review}, {a.clearFiles, !a.managing && !review},
 		{a.bodyLabel, !a.managing}, {a.body, !a.managing}, {a.status, !a.managing},
 	} {
 		var state uintptr
@@ -243,6 +250,7 @@ func (a *application) update() {
 		hwnd   uintptr
 		active bool
 	}{
+		{a.attachFiles, !review && !a.busy}, {a.clearFiles, !review && !a.busy && len(a.packetFiles) > 0},
 		{a.profiles, !review && !a.busy}, {a.reload, !review && !a.busy}, {a.lists, !review && !a.busy && a.path != ""},
 		{a.templates, !review && !a.busy && a.path != ""}, {a.preview, !review && !a.busy && a.path != ""}, {a.view, !a.busy}, {a.back, !a.busy}, {a.test, !a.busy}, {a.dispatch, !a.busy},
 	} {
@@ -257,7 +265,11 @@ func (a *application) update() {
 		readonly = 1
 	}
 	send.Call(a.subject, 0xcf, readonly, 0)
-	send.Call(a.attachmentURL, 0xcf, readonly, 0)
+	if review && len(a.packetFiles) > 0 {
+		caption(a.dispatch, "Send packet")
+	} else {
+		caption(a.dispatch, "Send to list")
+	}
 	send.Call(a.body, 0xcf, readonly, 0)
 	a.updateContacts()
 }
@@ -360,9 +372,9 @@ func (a *application) startReview() {
 		return
 	}
 	d := draft{ListID: id, Subject: strings.TrimSpace(value(a.subject)),
-		Body:          strings.TrimSpace(strings.ReplaceAll(value(a.body), "\r\n", "\n")),
-		Template:      a.templateIDs[templateIndex],
-		AttachmentURL: strings.TrimSpace(value(a.attachmentURL))}
+		Body:         strings.TrimSpace(strings.ReplaceAll(value(a.body), "\r\n", "\n")),
+		Template:     a.templateIDs[templateIndex],
+		PacketDigest: a.packetDigest}
 	if err := d.validate(a.profile); err != nil {
 		popup(a.window, "Preview email", err.Error(), 0x30)
 		return
@@ -449,10 +461,10 @@ func (a *application) edit() {
 	a.update()
 	previous, ok := a.attempted[attempt{a.path, d, false}]
 	if ok && previous.err == nil {
-		d.Subject, d.Body, d.AttachmentURL = "", "", ""
+		d.Subject, d.Body = "", ""
+		a.clearPacketFiles()
 	}
 	caption(a.subject, d.Subject)
-	caption(a.attachmentURL, d.AttachmentURL)
 	caption(a.body, strings.ReplaceAll(d.Body, "\n", "\r\n"))
 	caption(a.status, a.profile.Label+"   |   From "+a.profile.Sender.Email)
 }
@@ -471,8 +483,17 @@ func (a *application) submit(test bool) {
 	if test {
 		prompt = "Send a test only to " + a.profile.TestEmail + "?"
 	}
-	if key.draft.AttachmentURL != "" {
-		prompt += "\r\n\r\nAttachment: " + key.draft.AttachmentURL
+	files := a.packetFiles
+	if len(files) != 0 {
+		if !test {
+			testKey := key
+			testKey.test = true
+			if previous, ok := a.attempted[testKey]; !ok || previous.err != nil {
+				popup(a.window, "Send packet", "Send a successful test of this meeting packet first.", 0x30)
+				return
+			}
+		}
+		prompt += "\r\n\r\nAttachments: " + packetNames(files)
 	}
 	if popup(a.window, "Confirm send", prompt, 0x124) != 6 {
 		return
@@ -482,13 +503,30 @@ func (a *application) submit(test bool) {
 	caption(a.status, "Submitting to Brevo…")
 	p, content := a.profile, a.previewHTML
 	go func() {
-		id, err := newBrevoClient().submit(context.Background(), p, key.draft, content, test)
-		a.done <- outcome{key, id, err}
+		client := newBrevoClient()
+		result := outcome{attempt: key}
+		if len(files) > 0 {
+			result.packet, result.err = client.sendPacket(context.Background(), p, key.draft, content, files, test)
+		} else {
+			result.id, result.err = client.submit(context.Background(), p, key.draft, content, test)
+		}
+		a.done <- result
 		post.Call(a.window, wmResult, 0, 0)
 	}()
 }
 
 func (a *application) displayResult(result outcome) {
+	if result.attempt.draft.PacketDigest != ([32]byte{}) {
+		message := fmt.Sprintf("Brevo accepted %d of %d packet emails.", result.packet.accepted, result.packet.total)
+		if result.err != nil {
+			message = result.err.Error()
+			if result.packet.started {
+				message = fmt.Sprintf("Brevo confirmed %d of %d packet emails before a send could not be confirmed. Check the transactional logs before resending.\r\n%s", result.packet.accepted, result.packet.total, message)
+			}
+		}
+		caption(a.status, message)
+		return
+	}
 	text := "Brevo accepted the campaign for sending."
 	if result.attempt.test {
 		text = "Brevo accepted the test email."
@@ -519,6 +557,10 @@ func windowProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 			app.openProfile()
 		case id == reloadID && !app.busy && app.review == nil:
 			app.scanProfiles()
+		case id == attachFilesID && !app.busy && app.review == nil:
+			app.attachPacketFiles()
+		case id == clearFilesID && !app.busy && app.review == nil:
+			app.clearPacketFiles()
 		case id == previewID:
 			app.startReview()
 		case id == viewID && !app.busy:
@@ -539,7 +581,7 @@ func windowProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 	case wmResult:
 		result := <-app.done
 		app.busy = false
-		if result.err == nil || result.id > 0 {
+		if result.err == nil || result.id > 0 || result.packet.started {
 			app.attempted[result.attempt] = result
 		}
 		app.update()

@@ -11,7 +11,6 @@ import (
 	"io"
 	"net/http"
 	"net/mail"
-	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -115,11 +114,11 @@ func sortedIDs(labels map[string]string) []string {
 }
 
 type draft struct {
-	ListID        string
-	Subject       string
-	Body          string
-	Template      string
-	AttachmentURL string
+	ListID       string
+	Subject      string
+	Body         string
+	Template     string
+	PacketDigest [32]byte
 }
 
 func (d draft) validate(p profile) error {
@@ -139,24 +138,17 @@ func (d draft) validate(p profile) error {
 	if d.Body == "" || utf8.RuneCountInString(d.Body) > 20000 {
 		return fmt.Errorf("enter a message of up to 20,000 characters")
 	}
-	if d.AttachmentURL != "" {
-		link, err := url.ParseRequestURI(d.AttachmentURL)
-		if err != nil || (link.Scheme != "https" && link.Scheme != "http") ||
-			link.Hostname() == "" || link.User != nil {
-			return fmt.Errorf("enter a direct HTTP or HTTPS attachment URL")
-		}
-	}
+
 	return nil
 }
 
 type campaign struct {
-	Name          string             `json:"name"`
-	Subject       string             `json:"subject"`
-	Sender        sender             `json:"sender"`
-	ReplyTo       string             `json:"replyTo"`
-	Recipients    map[string][]int64 `json:"recipients"`
-	HTML          string             `json:"htmlContent"`
-	AttachmentURL string             `json:"attachmentUrl,omitempty"`
+	Name       string             `json:"name"`
+	Subject    string             `json:"subject"`
+	Sender     sender             `json:"sender"`
+	ReplyTo    string             `json:"replyTo"`
+	Recipients map[string][]int64 `json:"recipients"`
+	HTML       string             `json:"htmlContent"`
 }
 
 const bodyMarker = "[Insert body here]"
@@ -337,9 +329,8 @@ func (c brevoClient) submit(ctx context.Context, p profile, d draft, content str
 	payload := campaign{
 		Name:    p.Label + mode + hex.EncodeToString(random[:]),
 		Subject: d.Subject, Sender: p.Sender, ReplyTo: p.ReplyTo,
-		Recipients:    map[string][]int64{"listIds": {listID}},
-		HTML:          content,
-		AttachmentURL: d.AttachmentURL,
+		Recipients: map[string][]int64{"listIds": {listID}},
+		HTML:       content,
 	}
 	var created struct {
 		ID int64 `json:"id"`

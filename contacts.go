@@ -83,29 +83,33 @@ func (c listContact) name() string {
 }
 
 func (c brevoClient) searchListContacts(ctx context.Context, key string, listID int64, query string) ([]listContact, error) {
-	const pageSize = 500
+	contacts, err := c.listContacts(ctx, key, strconv.FormatInt(listID, 10))
+	if err != nil {
+		return nil, err
+	}
 	terms := strings.Fields(strings.ToLower(query))
-	var matches []listContact
-	for offset := 0; ; {
+	return slices.DeleteFunc(contacts, func(contact listContact) bool {
+		name := strings.ToLower(contact.name())
+		return contact.Email == "" || slices.ContainsFunc(terms, func(term string) bool {
+			return !strings.Contains(name, term)
+		})
+	}), nil
+}
+
+func (c brevoClient) listContacts(ctx context.Context, key, listID string) ([]listContact, error) {
+	const pageSize = 500
+	var contacts []listContact
+	for offset := 0; ; offset += pageSize {
 		var page struct {
 			Contacts []listContact
 		}
-		endpoint := fmt.Sprintf("contacts/lists/%d/contacts?limit=%d&offset=%d", listID, pageSize, offset)
+		endpoint := fmt.Sprintf("contacts/lists/%s/contacts?limit=%d&offset=%d", listID, pageSize, offset)
 		if err := c.request(ctx, key, http.MethodGet, endpoint, nil, &page); err != nil {
 			return nil, err
 		}
-		for _, contact := range page.Contacts {
-			name := strings.ToLower(contact.name())
-			if contact.Email != "" && slices.IndexFunc(terms, func(term string) bool {
-				return !strings.Contains(name, term)
-			}) == -1 {
-				matches = append(matches, contact)
-			}
-		}
+		contacts = append(contacts, page.Contacts...)
 		if len(page.Contacts) < pageSize {
-			break
+			return contacts, nil
 		}
-		offset += len(page.Contacts)
 	}
-	return matches, nil
 }
