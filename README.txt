@@ -1,4 +1,4 @@
-Brevo Club Mail 0.5.0 for Windows x64
+Brevo Club Mail 0.6.0 for Windows x64
 ===================================
 
 Extract the ZIP and double-click Brevo-Club-Mail.exe. Reuse your
@@ -59,6 +59,16 @@ enforce that separation, give the president a key from an account that
 contains only the approved Amador lists. Your CalDC profile and key
 can stay on your own PC. The profile's api_key can be replaced by
 api_key_env, the name of a Windows environment variable holding the key.
+
+Attaching a file
+----------------
+
+Paste a direct HTTP or HTTPS file URL into Attachment URL before you
+preview. Brevo must be able to fetch the file without signing in.
+The same attachment is included when sending a test or a campaign.
+Brevo allows one attachment up to 4 MB and fewer than 5,000 campaign
+recipients when an attachment is used. Leave the field blank for
+email without an attachment.
 
 Managing mailing lists
 ----------------------

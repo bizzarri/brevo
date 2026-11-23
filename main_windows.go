@@ -90,6 +90,7 @@ type previewOutcome struct {
 }
 
 type application struct {
+	attachmentLabel, attachmentURL uintptr
 	contactsUI
 	previewDir, previewHTML, previewFile                                                   string
 	previewDone                                                                            chan previewOutcome
@@ -165,6 +166,9 @@ func (a *application) init() {
 	a.templates = a.control("COMBOBOX", "", wsTab|0x00200003, 0, 0)
 	a.subjectLabel = a.control("STATIC", "Subject", 0, 0, 0)
 	a.subject = a.control("EDIT", "", wsTab|0x80, 0x200, 0)
+	a.attachmentLabel = a.control("STATIC", "Attachment URL", 0, 0, 0)
+	a.attachmentURL = a.control("EDIT", "", wsTab|0x80, 0x200, 0)
+	send.Call(a.attachmentURL, 0xc5, 8192, 0)
 	a.bodyLabel = a.control("STATIC", "Message", 0, 0, 0)
 	a.body = a.control("EDIT", "", wsTab|0x00201044, 0x200, 0)
 	send.Call(a.body, 0xc5, 40000, 0)
@@ -202,9 +206,11 @@ func (a *application) layout() {
 	set(a.templates, x+half+16, 127+y, half, 250)
 	set(a.subjectLabel, x, 172+y, width-32, 34)
 	set(a.subject, x, 208+y, width-32, 40)
-	set(a.bodyLabel, x, 254+y, width-32, 34)
-	buttonsY := max(370+y, height-160)
-	set(a.body, x, 290+y, width-32, buttonsY-302-y)
+	set(a.attachmentLabel, x, 258+y, 200, 34)
+	set(a.attachmentURL, x+202, 254+y, width-234, 40)
+	set(a.bodyLabel, x, 299+y, width-32, 34)
+	buttonsY := max(415+y, height-160)
+	set(a.body, x, 335+y, width-32, buttonsY-347-y)
 	buttonWidth := min(195, (width-68)/4)
 	set(a.preview, width-211, buttonsY, 195, 43)
 	set(a.dispatch, width-16-buttonWidth, buttonsY, buttonWidth, 43)
@@ -224,6 +230,7 @@ func (a *application) update() {
 		{a.test, review && !a.managing}, {a.dispatch, review && !a.managing}, {a.view, review && !a.managing},
 		{a.audienceLabel, !a.managing}, {a.lists, !a.managing}, {a.templateLabel, !a.managing},
 		{a.templates, !a.managing}, {a.subjectLabel, !a.managing}, {a.subject, !a.managing},
+		{a.attachmentLabel, !a.managing}, {a.attachmentURL, !a.managing},
 		{a.bodyLabel, !a.managing}, {a.body, !a.managing}, {a.status, !a.managing},
 	} {
 		var state uintptr
@@ -250,6 +257,7 @@ func (a *application) update() {
 		readonly = 1
 	}
 	send.Call(a.subject, 0xcf, readonly, 0)
+	send.Call(a.attachmentURL, 0xcf, readonly, 0)
 	send.Call(a.body, 0xcf, readonly, 0)
 	a.updateContacts()
 }
@@ -352,8 +360,9 @@ func (a *application) startReview() {
 		return
 	}
 	d := draft{ListID: id, Subject: strings.TrimSpace(value(a.subject)),
-		Body:     strings.TrimSpace(strings.ReplaceAll(value(a.body), "\r\n", "\n")),
-		Template: a.templateIDs[templateIndex]}
+		Body:          strings.TrimSpace(strings.ReplaceAll(value(a.body), "\r\n", "\n")),
+		Template:      a.templateIDs[templateIndex],
+		AttachmentURL: strings.TrimSpace(value(a.attachmentURL))}
 	if err := d.validate(a.profile); err != nil {
 		popup(a.window, "Preview email", err.Error(), 0x30)
 		return
@@ -440,9 +449,10 @@ func (a *application) edit() {
 	a.update()
 	previous, ok := a.attempted[attempt{a.path, d, false}]
 	if ok && previous.err == nil {
-		d.Subject, d.Body = "", ""
+		d.Subject, d.Body, d.AttachmentURL = "", "", ""
 	}
 	caption(a.subject, d.Subject)
+	caption(a.attachmentURL, d.AttachmentURL)
 	caption(a.body, strings.ReplaceAll(d.Body, "\n", "\r\n"))
 	caption(a.status, a.profile.Label+"   |   From "+a.profile.Sender.Email)
 }
@@ -460,6 +470,9 @@ func (a *application) submit(test bool) {
 	prompt := "Send this email to " + label + "?\r\n\r\nSubject: " + key.draft.Subject
 	if test {
 		prompt = "Send a test only to " + a.profile.TestEmail + "?"
+	}
+	if key.draft.AttachmentURL != "" {
+		prompt += "\r\n\r\nAttachment: " + key.draft.AttachmentURL
 	}
 	if popup(a.window, "Confirm send", prompt, 0x124) != 6 {
 		return
