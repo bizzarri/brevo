@@ -44,7 +44,9 @@ type contactResult struct {
 
 func (a *application) initContacts() {
 	a.contactDone = make(chan contactResult, 1)
-	a.switchScreen = a.control("BUTTON", "Manage mailing lists", wsTab, 0, switchScreenID)
+	if listManagerMode != "1" {
+		a.switchScreen = a.control("BUTTON", "Manage mailing lists", wsTab, 0, switchScreenID)
+	}
 	a.contactListLabel = a.control("STATIC", "Mailing list", 0, 0, 0)
 	a.contactLists = a.control("COMBOBOX", "", wsTab|0x00200003, 0, contactListID)
 	a.emailLabel = a.control("STATIC", "Contact name or email address", 0, 0, 0)
@@ -60,23 +62,28 @@ func (a *application) initContacts() {
 }
 
 func (a *application) layoutContacts(set func(uintptr, int, int, int, int), width, height int) {
-	set(a.switchScreen, 16, 92, 280, 40)
-	set(a.contactListLabel, 16, 140, width-32, 35)
-	set(a.contactLists, 16, 176, width-32, 250)
-	set(a.emailLabel, 16, 221, width-32, 35)
-	set(a.emailField, 16, 257, width-350, 40)
-	set(a.find, width-322, 257, 134, 40)
-	set(a.search, width-178, 257, 162, 40)
+	top := 0
+	if a.switchScreen != 0 {
+		set(a.switchScreen, 16, 92, 280, 40)
+	} else {
+		top = 48
+	}
+	set(a.contactListLabel, 16, 140-top, width-32, 35)
+	set(a.contactLists, 16, 176-top, width-32, 250)
+	set(a.emailLabel, 16, 221-top, width-32, 35)
+	set(a.emailField, 16, 257-top, width-350, 40)
+	set(a.find, width-322, 257-top, 134, 40)
+	set(a.search, width-178, 257-top, 162, 40)
 	buttonWidth := (width - 56) / 3
-	set(a.addMember, 16, 310, buttonWidth, 42)
-	set(a.removeMember, 28+buttonWidth, 310, buttonWidth, 42)
-	set(a.unsubscribe, 40+2*buttonWidth, 310, buttonWidth, 42)
+	set(a.addMember, 16, 310-top, buttonWidth, 42)
+	set(a.removeMember, 28+buttonWidth, 310-top, buttonWidth, 42)
+	set(a.unsubscribe, 40+2*buttonWidth, 310-top, buttonWidth, 42)
 	detailsWidth := width - 32
 	if len(a.matches) > 0 {
 		detailsWidth = (width - 48) / 2
-		set(a.matchesList, 32+detailsWidth, 365, detailsWidth, height-381)
+		set(a.matchesList, 32+detailsWidth, 365-top, detailsWidth, height-381+top)
 	}
-	set(a.contactDetails, 16, 365, detailsWidth, height-381)
+	set(a.contactDetails, 16, 365-top, detailsWidth, height-381+top)
 }
 
 func (a *application) updateContacts() {
@@ -150,14 +157,14 @@ func (a *application) clearContact() {
 	a.selectedContact = listContact{}
 	prompt := "Choose a mailing list. Search by name or look up an exact email address."
 	if a.path == "" {
-		prompt = "Select a valid account profile. See Compose email for profile status."
+		prompt = "Select a valid account profile."
 	}
 	caption(a.contactDetails, prompt)
 }
 
 func (a *application) contactCommand(id, notification uintptr) bool {
 	switch {
-	case id == switchScreenID && !a.busy && a.review == nil:
+	case id == switchScreenID && a.switchScreen != 0 && !a.busy && a.review == nil:
 		a.managing = !a.managing
 		label := "Manage mailing lists"
 		if a.managing {

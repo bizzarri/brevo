@@ -80,8 +80,9 @@ if a packet send could only be partially confirmed.
 Managing mailing lists
 ----------------------
 
-Click Manage mailing lists, choose an account profile and mailing
-list. Enter part of a name and click Search, then select a
+Open Brevo-List-Manager.exe from the same folder as your Club Mail
+profile JSON, or click Manage mailing lists in Club Mail. Choose an
+account profile and mailing list. Enter part of a name and click Search, then select a
 match. You can also enter an exact email address and click Look up.
 The contact details show list membership and email subscription status.
 
@@ -101,3 +102,7 @@ From the repository root in Command Prompt:
     go build -trimpath -ldflags="-H windowsgui" -o Brevo-Club-Mail.exe .
 
 No Python, Go installation, or relay is needed to run the supplied EXE.
+
+Build the standalone list manager from the same source:
+
+    go build -trimpath -ldflags="-H windowsgui -X main.listManagerMode=1" -o Brevo-List-Manager.exe .

@@ -90,6 +90,10 @@ type previewOutcome struct {
 	err     error
 }
 
+// Set at link time for the standalone list manager.
+var listManagerMode string
+var appTitle = "Brevo Club Mail"
+
 type application struct {
 	attachmentLabel, attachmentURL, attachFiles, clearFiles uintptr
 	packetFiles                                             []packetFile
@@ -274,6 +278,13 @@ func (a *application) update() {
 	a.updateContacts()
 }
 
+func (a *application) profileError(message string) {
+	caption(a.status, message)
+	if a.managing {
+		caption(a.contactDetails, message)
+	}
+}
+
 func (a *application) scanProfiles() {
 	oldPath := a.path
 	a.path = ""
@@ -285,7 +296,7 @@ func (a *application) scanProfiles() {
 	send.Call(a.templates, cbReset, 0, 0)
 	entries, err := os.ReadDir(a.dir)
 	if err != nil {
-		caption(a.status, "Could not read the folder that contains the app.")
+		a.profileError("Could not read the folder that contains the app.")
 		a.update()
 		return
 	}
@@ -304,7 +315,7 @@ func (a *application) scanProfiles() {
 		add(a.profiles, name)
 	}
 	if len(a.files) == 0 {
-		caption(a.status, "Copy club-mail.example.json to club-mail.json next to this app, fill it in, then click Reload profiles.")
+		a.profileError("Put this app next to your Club Mail profile JSON, then click Reload profiles.")
 		a.update()
 		return
 	}
@@ -326,7 +337,7 @@ func (a *application) openProfile() {
 	a.ids, a.templateIDs = nil, nil
 	if err != nil {
 		a.resetContactLists()
-		caption(a.status, "Profile: "+err.Error())
+		a.profileError("Profile: " + err.Error())
 		a.update()
 		return
 	}
@@ -557,6 +568,7 @@ func windowProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 			app.openProfile()
 		case id == reloadID && !app.busy && app.review == nil:
 			app.scanProfiles()
+		case app.managing:
 		case id == attachFilesID && !app.busy && app.review == nil:
 			app.attachPacketFiles()
 		case id == clearFilesID && !app.busy && app.review == nil:
@@ -588,7 +600,7 @@ func windowProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 		app.displayResult(result)
 	case wmClose:
 		if app.busy {
-			popup(hwnd, "Brevo Club Mail", "Wait for the current operation to finish.", 0x30)
+			popup(hwnd, appTitle, "Wait for the current operation to finish.", 0x30)
 			return 0
 		}
 	case wmDestroy:
@@ -624,9 +636,13 @@ func sizeWindow(hwnd uintptr) {
 
 func main() {
 	runtime.LockOSThread()
+	if listManagerMode == "1" {
+		appTitle = "Brevo List Manager"
+		app.managing = true
+	}
 	executable, err := os.Executable()
 	if err != nil {
-		popup(0, "Brevo Club Mail", "Could not locate the app folder.", 0x10)
+		popup(0, appTitle, "Could not locate the app folder.", 0x10)
 		return
 	}
 	app.dir = filepath.Dir(executable)
@@ -646,16 +662,16 @@ func main() {
 	wc.size = uint32(unsafe.Sizeof(wc))
 	registered, _, _ := user.NewProc("RegisterClassExW").Call(uintptr(unsafe.Pointer(&wc)))
 	if registered == 0 {
-		popup(0, "Brevo Club Mail", "Could not register the app window.", 0x10)
+		popup(0, appTitle, "Could not register the app window.", 0x10)
 		return
 	}
-	title := wide("Brevo Club Mail")
+	title := wide(appTitle)
 	hwnd, _, _ := create.Call(0x10000, ptr(name), ptr(title), 0x00cf0000, cwDefault, cwDefault,
 		1090, 720, 0, 0, instance, 0)
 	runtime.KeepAlive(name)
 	runtime.KeepAlive(title)
 	if hwnd == 0 {
-		popup(0, "Brevo Club Mail", "Could not open the app window.", 0x10)
+		popup(0, appTitle, "Could not open the app window.", 0x10)
 		return
 	}
 	app.window = hwnd
