@@ -81,6 +81,7 @@ type outcome struct {
 	attempt attempt
 	id      int64
 	err     error
+	packet  packetResult
 }
 
 type previewOutcome struct {
@@ -89,7 +90,15 @@ type previewOutcome struct {
 	err     error
 }
 
+// Set at link time for the standalone list manager.
+var listManagerMode string
+var appTitle = "Brevo Club Mail"
+
 type application struct {
+	attachmentLabel, attachmentURL, attachFiles, clearFiles uintptr
+	packetFiles                                             []packetFile
+	packetDigest                                            [32]byte
+	contactsUI
 	previewDir, previewHTML, previewFile                                                   string
 	previewDone                                                                            chan previewOutcome
 	window, font                                                                           uintptr
@@ -164,6 +173,10 @@ func (a *application) init() {
 	a.templates = a.control("COMBOBOX", "", wsTab|0x00200003, 0, 0)
 	a.subjectLabel = a.control("STATIC", "Subject", 0, 0, 0)
 	a.subject = a.control("EDIT", "", wsTab|0x80, 0x200, 0)
+	a.attachmentLabel = a.control("STATIC", "Files", 0, 0, 0)
+	a.attachmentURL = a.control("EDIT", "", wsTab|0x880, 0x200, 0)
+	a.attachFiles = a.control("BUTTON", "Attach files", wsTab, 0, attachFilesID)
+	a.clearFiles = a.control("BUTTON", "Clear", wsTab, 0, clearFilesID)
 	a.bodyLabel = a.control("STATIC", "Message", 0, 0, 0)
 	a.body = a.control("EDIT", "", wsTab|0x00201044, 0x200, 0)
 	send.Call(a.body, 0xc5, 40000, 0)
@@ -173,6 +186,7 @@ func (a *application) init() {
 	a.back = a.control("BUTTON", "Edit", wsTab, 0, backID)
 	a.view = a.control("BUTTON", "View HTML", wsTab, 0, viewID)
 	a.status = a.control("EDIT", "", wsTab|0x00200844, 0x200, 0)
+	a.initContacts()
 	a.scanProfiles()
 	a.layout()
 }
@@ -192,15 +206,21 @@ func (a *application) layout() {
 	set(a.profileLabel, x, 10, width-32, 34)
 	set(a.profiles, x, 46, width-252, 280)
 	set(a.reload, width-226, 45, 210, 40)
-	set(a.audienceLabel, x, 91, half, 34)
-	set(a.templateLabel, x+half+16, 91, half, 34)
-	set(a.lists, x, 127, half, 250)
-	set(a.templates, x+half+16, 127, half, 250)
-	set(a.subjectLabel, x, 172, width-32, 34)
-	set(a.subject, x, 208, width-32, 40)
-	set(a.bodyLabel, x, 254, width-32, 34)
-	buttonsY := max(370, height-160)
-	set(a.body, x, 290, width-32, buttonsY-302)
+	a.layoutContacts(set, width, height)
+	y := 49
+	set(a.audienceLabel, x, 91+y, half, 34)
+	set(a.templateLabel, x+half+16, 91+y, half, 34)
+	set(a.lists, x, 127+y, half, 250)
+	set(a.templates, x+half+16, 127+y, half, 250)
+	set(a.subjectLabel, x, 172+y, width-32, 34)
+	set(a.subject, x, 208+y, width-32, 40)
+	set(a.attachmentLabel, x, 258+y, 60, 34)
+	set(a.attachmentURL, x+64, 254+y, width-366, 40)
+	set(a.attachFiles, width-286, 254+y, 160, 40)
+	set(a.clearFiles, width-116, 254+y, 100, 40)
+	set(a.bodyLabel, x, 299+y, width-32, 34)
+	buttonsY := max(415+y, height-160)
+	set(a.body, x, 335+y, width-32, buttonsY-347-y)
 	buttonWidth := min(195, (width-68)/4)
 	set(a.preview, width-211, buttonsY, 195, 43)
 	set(a.dispatch, width-16-buttonWidth, buttonsY, buttonWidth, 43)
@@ -216,7 +236,13 @@ func (a *application) update() {
 		hwnd    uintptr
 		visible bool
 	}{
-		{a.preview, !review}, {a.back, review}, {a.test, review}, {a.dispatch, review}, {a.view, review},
+		{a.preview, !review && !a.managing}, {a.back, review && !a.managing},
+		{a.test, review && !a.managing}, {a.dispatch, review && !a.managing}, {a.view, review && !a.managing},
+		{a.audienceLabel, !a.managing}, {a.lists, !a.managing}, {a.templateLabel, !a.managing},
+		{a.templates, !a.managing}, {a.subjectLabel, !a.managing}, {a.subject, !a.managing},
+		{a.attachmentLabel, !a.managing}, {a.attachmentURL, !a.managing},
+		{a.attachFiles, !a.managing && !review}, {a.clearFiles, !a.managing && !review},
+		{a.bodyLabel, !a.managing}, {a.body, !a.managing}, {a.status, !a.managing},
 	} {
 		var state uintptr
 		if item.visible {
@@ -228,6 +254,7 @@ func (a *application) update() {
 		hwnd   uintptr
 		active bool
 	}{
+		{a.attachFiles, !review && !a.busy}, {a.clearFiles, !review && !a.busy && len(a.packetFiles) > 0},
 		{a.profiles, !review && !a.busy}, {a.reload, !review && !a.busy}, {a.lists, !review && !a.busy && a.path != ""},
 		{a.templates, !review && !a.busy && a.path != ""}, {a.preview, !review && !a.busy && a.path != ""}, {a.view, !a.busy}, {a.back, !a.busy}, {a.test, !a.busy}, {a.dispatch, !a.busy},
 	} {
@@ -242,19 +269,34 @@ func (a *application) update() {
 		readonly = 1
 	}
 	send.Call(a.subject, 0xcf, readonly, 0)
+	if review && len(a.packetFiles) > 0 {
+		caption(a.dispatch, "Send packet")
+	} else {
+		caption(a.dispatch, "Send to list")
+	}
 	send.Call(a.body, 0xcf, readonly, 0)
+	a.updateContacts()
+}
+
+func (a *application) profileError(message string) {
+	caption(a.status, message)
+	if a.managing {
+		caption(a.contactDetails, message)
+	}
 }
 
 func (a *application) scanProfiles() {
 	oldPath := a.path
 	a.path = ""
 	a.files = nil
+	a.ids = nil
+	a.resetContactLists()
 	send.Call(a.profiles, cbReset, 0, 0)
 	send.Call(a.lists, cbReset, 0, 0)
 	send.Call(a.templates, cbReset, 0, 0)
 	entries, err := os.ReadDir(a.dir)
 	if err != nil {
-		caption(a.status, "Could not read the folder that contains the app.")
+		a.profileError("Could not read the folder that contains the app.")
 		a.update()
 		return
 	}
@@ -273,7 +315,7 @@ func (a *application) scanProfiles() {
 		add(a.profiles, name)
 	}
 	if len(a.files) == 0 {
-		caption(a.status, "Copy club-mail.example.json to club-mail.json next to this app, fill it in, then click Reload profiles.")
+		a.profileError("Put this app next to your Club Mail profile JSON, then click Reload profiles.")
 		a.update()
 		return
 	}
@@ -294,7 +336,8 @@ func (a *application) openProfile() {
 	a.profile = profile{}
 	a.ids, a.templateIDs = nil, nil
 	if err != nil {
-		caption(a.status, "Profile: "+err.Error())
+		a.resetContactLists()
+		a.profileError("Profile: " + err.Error())
 		a.update()
 		return
 	}
@@ -320,6 +363,7 @@ func (a *application) openProfile() {
 	if len(a.templateIDs) == 1 || len(p.Templates) == 1 {
 		send.Call(a.templates, cbSet, 0, 0)
 	}
+	a.resetContactLists()
 	caption(a.status, p.Label+"   |   From "+p.Sender.Email)
 	a.update()
 }
@@ -339,8 +383,9 @@ func (a *application) startReview() {
 		return
 	}
 	d := draft{ListID: id, Subject: strings.TrimSpace(value(a.subject)),
-		Body:     strings.TrimSpace(strings.ReplaceAll(value(a.body), "\r\n", "\n")),
-		Template: a.templateIDs[templateIndex]}
+		Body:         strings.TrimSpace(strings.ReplaceAll(value(a.body), "\r\n", "\n")),
+		Template:     a.templateIDs[templateIndex],
+		PacketDigest: a.packetDigest}
 	if err := d.validate(a.profile); err != nil {
 		popup(a.window, "Preview email", err.Error(), 0x30)
 		return
@@ -428,6 +473,7 @@ func (a *application) edit() {
 	previous, ok := a.attempted[attempt{a.path, d, false}]
 	if ok && previous.err == nil {
 		d.Subject, d.Body = "", ""
+		a.clearPacketFiles()
 	}
 	caption(a.subject, d.Subject)
 	caption(a.body, strings.ReplaceAll(d.Body, "\n", "\r\n"))
@@ -448,6 +494,18 @@ func (a *application) submit(test bool) {
 	if test {
 		prompt = "Send a test only to " + a.profile.TestEmail + "?"
 	}
+	files := a.packetFiles
+	if len(files) != 0 {
+		if !test {
+			testKey := key
+			testKey.test = true
+			if previous, ok := a.attempted[testKey]; !ok || previous.err != nil {
+				popup(a.window, "Send packet", "Send a successful test of this meeting packet first.", 0x30)
+				return
+			}
+		}
+		prompt += "\r\n\r\nAttachments: " + packetNames(files)
+	}
 	if popup(a.window, "Confirm send", prompt, 0x124) != 6 {
 		return
 	}
@@ -456,13 +514,30 @@ func (a *application) submit(test bool) {
 	caption(a.status, "Submitting to Brevo…")
 	p, content := a.profile, a.previewHTML
 	go func() {
-		id, err := newBrevoClient().submit(context.Background(), p, key.draft, content, test)
-		a.done <- outcome{key, id, err}
+		client := newBrevoClient()
+		result := outcome{attempt: key}
+		if len(files) > 0 {
+			result.packet, result.err = client.sendPacket(context.Background(), p, key.draft, content, files, test)
+		} else {
+			result.id, result.err = client.submit(context.Background(), p, key.draft, content, test)
+		}
+		a.done <- result
 		post.Call(a.window, wmResult, 0, 0)
 	}()
 }
 
 func (a *application) displayResult(result outcome) {
+	if result.attempt.draft.PacketDigest != ([32]byte{}) {
+		message := fmt.Sprintf("Brevo accepted %d of %d packet emails.", result.packet.accepted, result.packet.total)
+		if result.err != nil {
+			message = result.err.Error()
+			if result.packet.started {
+				message = fmt.Sprintf("Brevo confirmed %d of %d packet emails before a send could not be confirmed. Check the transactional logs before resending.\r\n%s", result.packet.accepted, result.packet.total, message)
+			}
+		}
+		caption(a.status, message)
+		return
+	}
 	text := "Brevo accepted the campaign for sending."
 	if result.attempt.test {
 		text = "Brevo accepted the test email."
@@ -488,10 +563,16 @@ func windowProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 	case wmCommand:
 		id, notification := wParam&0xffff, (wParam>>16)&0xffff
 		switch {
+		case app.contactCommand(id, notification):
 		case id == profilesID && notification == 1 && !app.busy && app.review == nil:
 			app.openProfile()
 		case id == reloadID && !app.busy && app.review == nil:
 			app.scanProfiles()
+		case app.managing:
+		case id == attachFilesID && !app.busy && app.review == nil:
+			app.attachPacketFiles()
+		case id == clearFilesID && !app.busy && app.review == nil:
+			app.clearPacketFiles()
 		case id == previewID:
 			app.startReview()
 		case id == viewID && !app.busy:
@@ -505,19 +586,21 @@ func windowProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 		case id == backID && app.review != nil && !app.busy:
 			app.edit()
 		}
+	case wmContactResult:
+		app.finishContact(<-app.contactDone)
 	case wmPreview:
 		app.showReview(<-app.previewDone)
 	case wmResult:
 		result := <-app.done
 		app.busy = false
-		if result.err == nil || result.id > 0 {
+		if result.err == nil || result.id > 0 || result.packet.started {
 			app.attempted[result.attempt] = result
 		}
 		app.update()
 		app.displayResult(result)
 	case wmClose:
 		if app.busy {
-			popup(hwnd, "Brevo Club Mail", "Wait for the current operation to finish.", 0x30)
+			popup(hwnd, appTitle, "Wait for the current operation to finish.", 0x30)
 			return 0
 		}
 	case wmDestroy:
@@ -553,9 +636,13 @@ func sizeWindow(hwnd uintptr) {
 
 func main() {
 	runtime.LockOSThread()
+	if listManagerMode == "1" {
+		appTitle = "Brevo List Manager"
+		app.managing = true
+	}
 	executable, err := os.Executable()
 	if err != nil {
-		popup(0, "Brevo Club Mail", "Could not locate the app folder.", 0x10)
+		popup(0, appTitle, "Could not locate the app folder.", 0x10)
 		return
 	}
 	app.dir = filepath.Dir(executable)
@@ -575,16 +662,16 @@ func main() {
 	wc.size = uint32(unsafe.Sizeof(wc))
 	registered, _, _ := user.NewProc("RegisterClassExW").Call(uintptr(unsafe.Pointer(&wc)))
 	if registered == 0 {
-		popup(0, "Brevo Club Mail", "Could not register the app window.", 0x10)
+		popup(0, appTitle, "Could not register the app window.", 0x10)
 		return
 	}
-	title := wide("Brevo Club Mail")
+	title := wide(appTitle)
 	hwnd, _, _ := create.Call(0x10000, ptr(name), ptr(title), 0x00cf0000, cwDefault, cwDefault,
 		1090, 720, 0, 0, instance, 0)
 	runtime.KeepAlive(name)
 	runtime.KeepAlive(title)
 	if hwnd == 0 {
-		popup(0, "Brevo Club Mail", "Could not open the app window.", 0x10)
+		popup(0, appTitle, "Could not open the app window.", 0x10)
 		return
 	}
 	app.window = hwnd

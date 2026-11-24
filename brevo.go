@@ -114,10 +114,11 @@ func sortedIDs(labels map[string]string) []string {
 }
 
 type draft struct {
-	ListID   string
-	Subject  string
-	Body     string
-	Template string
+	ListID       string
+	Subject      string
+	Body         string
+	Template     string
+	PacketDigest [32]byte
 }
 
 func (d draft) validate(p profile) error {
@@ -137,6 +138,7 @@ func (d draft) validate(p profile) error {
 	if d.Body == "" || utf8.RuneCountInString(d.Body) > 20000 {
 		return fmt.Errorf("enter a message of up to 20,000 characters")
 	}
+
 	return nil
 }
 
@@ -220,12 +222,21 @@ func newBrevoClient() brevoClient {
 	}
 }
 
+type brevoHTTPError struct {
+	status  int
+	details string
+}
+
+func (e brevoHTTPError) Error() string {
+	return fmt.Sprintf("Brevo HTTP %d%s", e.status, errorDetails(e.details))
+}
+
 func (c brevoClient) request(ctx context.Context, key, method, endpoint string, payload any, result any) error {
 	var body io.Reader
 	if payload != nil {
 		data, err := json.Marshal(payload)
 		if err != nil {
-			return fmt.Errorf("could not encode the campaign")
+			return fmt.Errorf("could not encode the Brevo request")
 		}
 		body = bytes.NewReader(data)
 	}
@@ -251,7 +262,7 @@ func (c brevoClient) request(ctx context.Context, key, method, endpoint string, 
 		if len(runes) > 380 {
 			text = string(runes[:380]) + "…"
 		}
-		return fmt.Errorf("Brevo HTTP %d%s", res.StatusCode, errorDetails(text))
+		return brevoHTTPError{status: res.StatusCode, details: text}
 	}
 	if result != nil {
 		if err := json.NewDecoder(io.LimitReader(res.Body, 8<<20)).Decode(result); err != nil {

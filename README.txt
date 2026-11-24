@@ -1,4 +1,4 @@
-Brevo Club Mail 0.5.0 for Windows x64
+Brevo Club Mail 0.6.0 for Windows x64
 ===================================
 
 Extract the ZIP and double-click Brevo-Club-Mail.exe. Reuse your
@@ -60,6 +60,42 @@ contains only the approved Amador lists. Your CalDC profile and key
 can stay on your own PC. The profile's api_key can be replaced by
 api_key_env, the name of a Windows environment variable holding the key.
 
+Sending a meeting packet
+------------------------
+
+For member notices such as agendas and minutes, click Attach files
+and select all the local files for the packet. Use Ctrl or Shift to
+select multiple files in the picker. Files are limited to 12 MB
+combined. Click Clear to return to the regular campaign workflow.
+
+Preview the email and click Send test. After Brevo accepts the test,
+check that all your attachments arrived, then click Send packet.
+The app sends a separate message to each eligible member, skipping
+Brevo contacts who are email-blocklisted or have opted out of the
+selected list. Brevo also applies its transactional blocklist.
+Your profile key needs permission to read contacts and send
+transactional email. Check Brevo's transactional logs before retrying
+if a packet send could only be partially confirmed.
+
+Managing mailing lists
+----------------------
+
+Open Brevo-List-Manager.exe from the same folder as your Club Mail
+profile JSON, or click Manage mailing lists in Club Mail. Choose an
+account profile and mailing list. Enter part of a name and click Search, then select a
+match. You can also enter an exact email address and click Look up.
+The contact details show list membership and email subscription status.
+
+To add someone, enter their email address and click Look up. Enter
+a first or last name if Brevo has none, then click Add to list. If
+they already belong to the list and have no name, click Save name. Remove from list removes
+only the selected membership. Unsubscribe email keeps the contact on
+their lists and blocks email campaigns across that Brevo account.
+Adding an existing contact does not clear their email blocklist status.
+
+Use a Brevo API key that can read contacts for lookup and create or
+update contacts for list changes.
+
 Building from source
 --------------------
 
@@ -68,3 +104,7 @@ From the repository root in Command Prompt:
     go build -trimpath -ldflags="-H windowsgui" -o Brevo-Club-Mail.exe .
 
 No Python, Go installation, or relay is needed to run the supplied EXE.
+
+Build the standalone list manager from the same source:
+
+    go build -trimpath -ldflags="-H windowsgui -X main.listManagerMode=1" -o Brevo-List-Manager.exe .
