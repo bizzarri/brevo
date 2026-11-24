@@ -52,20 +52,52 @@ const (
 	unsubscribeContact
 )
 
-func (c brevoClient) changeContact(ctx context.Context, key, email string, listID int64, action contactAction, contact listContact) error {
-	if action == addContact && contact.ID == 0 {
-		return c.request(ctx, key, http.MethodPost, "contacts", map[string]any{
-			"email": email, "listIds": []int64{listID},
-		}, nil)
-	}
-	if contact.ID <= 0 {
-		return fmt.Errorf("look up the contact again")
-	}
-	endpoint := "contacts/" + strconv.FormatInt(contact.ID, 10) + "?identifierType=contact_id"
+type contactName struct {
+	first, last string
+}
+
+func (n contactName) full() string {
+	return strings.TrimSpace(strings.TrimSpace(n.first) + " " + strings.TrimSpace(n.last))
+}
+
+func (c listContact) nameParts() contactName {
+	first, _ := c.Attributes["FIRSTNAME"].(string)
+	last, _ := c.Attributes["LASTNAME"].(string)
+	return contactName{first: first, last: last}
+}
+
+func (c listContact) name() string {
+	return c.nameParts().full()
+}
+
+func (c brevoClient) changeContact(ctx context.Context, key, email string, listID int64, action contactAction, contact listContact, name contactName) error {
 	var payload map[string]any
 	switch action {
 	case addContact:
-		payload = map[string]any{"listIds": []int64{listID}}
+		if !contactEmail(email) {
+			return fmt.Errorf("enter a valid email address")
+		}
+		payload = make(map[string]any)
+		if !contact.onList(listID) {
+			payload["listIds"] = []int64{listID}
+		}
+		if contact.name() == "" {
+			if name.full() == "" {
+				return fmt.Errorf("enter a first or last name")
+			}
+			attributes := make(map[string]string)
+			if first := strings.TrimSpace(name.first); first != "" {
+				attributes["FIRSTNAME"] = first
+			}
+			if last := strings.TrimSpace(name.last); last != "" {
+				attributes["LASTNAME"] = last
+			}
+			payload["attributes"] = attributes
+		}
+		if contact.ID == 0 {
+			payload["email"] = email
+			return c.request(ctx, key, http.MethodPost, "contacts", payload, nil)
+		}
 	case removeContact:
 		payload = map[string]any{"unlinkListIds": []int64{listID}}
 	case unsubscribeContact:
@@ -73,13 +105,11 @@ func (c brevoClient) changeContact(ctx context.Context, key, email string, listI
 	default:
 		return fmt.Errorf("unknown contact action")
 	}
+	if contact.ID <= 0 {
+		return fmt.Errorf("look up the contact again")
+	}
+	endpoint := "contacts/" + strconv.FormatInt(contact.ID, 10) + "?identifierType=contact_id"
 	return c.request(ctx, key, http.MethodPut, endpoint, payload, nil)
-}
-
-func (c listContact) name() string {
-	first, _ := c.Attributes["FIRSTNAME"].(string)
-	last, _ := c.Attributes["LASTNAME"].(string)
-	return strings.TrimSpace(first + " " + last)
 }
 
 func (c brevoClient) searchListContacts(ctx context.Context, key string, listID int64, query string) ([]listContact, error) {

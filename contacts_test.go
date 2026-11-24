@@ -14,12 +14,15 @@ func TestContactChangesPreserveOtherSubscriptions(t *testing.T) {
 		name                      string
 		action                    contactAction
 		contact                   listContact
+		contactName               contactName
 		method, path, query, body string
 	}{
-		{"create", addContact, listContact{}, "POST", "/contacts", "", `{"email":"member@example.org","listIds":[7]}`},
-		{"add existing", addContact, listContact{ID: 42, EmailBlacklisted: true}, "PUT", "/contacts/42", "identifierType=contact_id", `{"listIds":[7]}`},
-		{"remove membership", removeContact, listContact{ID: 42}, "PUT", "/contacts/42", "identifierType=contact_id", `{"unlinkListIds":[7]}`},
-		{"unsubscribe and retain lists", unsubscribeContact, listContact{ID: 42}, "PUT", "/contacts/42", "identifierType=contact_id", `{"emailBlacklisted":true}`},
+		{"create", addContact, listContact{}, contactName{first: " Alice ", last: "Martin"}, "POST", "/contacts", "", `{"attributes":{"FIRSTNAME":"Alice","LASTNAME":"Martin"},"email":"member@example.org","listIds":[7]}`},
+		{"add existing", addContact, listContact{ID: 42, EmailBlacklisted: true, Attributes: map[string]any{"FIRSTNAME": "Alice"}}, contactName{}, "PUT", "/contacts/42", "identifierType=contact_id", `{"listIds":[7]}`},
+		{"add existing missing name", addContact, listContact{ID: 42, EmailBlacklisted: true}, contactName{last: "Martin"}, "PUT", "/contacts/42", "identifierType=contact_id", `{"attributes":{"LASTNAME":"Martin"},"listIds":[7]}`},
+		{"name existing member", addContact, listContact{ID: 42, ListIDs: []int64{7}}, contactName{first: "Alice"}, "PUT", "/contacts/42", "identifierType=contact_id", `{"attributes":{"FIRSTNAME":"Alice"}}`},
+		{"remove membership", removeContact, listContact{ID: 42}, contactName{}, "PUT", "/contacts/42", "identifierType=contact_id", `{"unlinkListIds":[7]}`},
+		{"unsubscribe and retain lists", unsubscribeContact, listContact{ID: 42}, contactName{}, "PUT", "/contacts/42", "identifierType=contact_id", `{"emailBlacklisted":true}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -34,7 +37,7 @@ func TestContactChangesPreserveOtherSubscriptions(t *testing.T) {
 			}))
 			defer server.Close()
 			client := brevoClient{base: server.URL + "/", http: server.Client()}
-			if err := client.changeContact(context.Background(), "test-key", "member@example.org", 7, tc.action, tc.contact); err != nil {
+			if err := client.changeContact(context.Background(), "test-key", "member@example.org", 7, tc.action, tc.contact, tc.contactName); err != nil {
 				t.Fatal(err)
 			}
 		})
@@ -93,5 +96,15 @@ func TestSearchListContacts(t *testing.T) {
 	matches, err := client.searchListContacts(context.Background(), "test-key", 7, " mar  ALI ")
 	if err != nil || len(matches) != 1 || matches[0].Email != "match@example.org" || !matches[0].EmailBlacklisted {
 		t.Fatalf("unexpected matches: %+v, %v", matches, err)
+	}
+}
+
+func TestAddContactRequiresNameAndEmail(t *testing.T) {
+	client := brevoClient{}
+	if err := client.changeContact(context.Background(), "", "", 7, addContact, listContact{}, contactName{first: "Alice"}); err == nil {
+		t.Fatal("accepted missing email")
+	}
+	if err := client.changeContact(context.Background(), "", "member@example.org", 7, addContact, listContact{}, contactName{}); err == nil {
+		t.Fatal("accepted missing name")
 	}
 }

@@ -86,7 +86,9 @@ account profile and mailing list. Enter part of a name and click Search, then se
 match. You can also enter an exact email address and click Look up.
 The contact details show list membership and email subscription status.
 
-Add to list creates the contact if needed. Remove from list removes
+To add someone, enter their email address and click Look up. Enter
+a first or last name if Brevo has none, then click Add to list. If
+they already belong to the list and have no name, click Save name. Remove from list removes
 only the selected membership. Unsubscribe email keeps the contact on
 their lists and blocks email campaigns across that Brevo account.
 Adding an existing contact does not clear their email blocklist status.

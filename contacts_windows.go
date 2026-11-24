@@ -20,9 +20,12 @@ const (
 	unsubscribeContactID
 	searchContactsID
 	contactMatchesID
+	contactFirstNameID
+	contactLastNameID
 )
 
 type contactsUI struct {
+	firstLabel, firstName, lastLabel, lastName                           uintptr
 	switchScreen, contactListLabel, contactLists, emailLabel, emailField uintptr
 	find, addMember, removeMember, unsubscribe, contactDetails           uintptr
 	search, matchesList                                                  uintptr
@@ -55,6 +58,10 @@ func (a *application) initContacts() {
 	a.search = a.control("BUTTON", "Search", wsTab, 0, searchContactsID)
 	a.matchesList = a.control("LISTBOX", "Matching contacts", wsTab|0x00200101, 0x200, contactMatchesID)
 	a.find = a.control("BUTTON", "Look up", wsTab, 0, findContactID)
+	a.firstLabel = a.control("STATIC", "First name", 0, 0, 0)
+	a.firstName = a.control("EDIT", "", wsTab|0x80, 0x200, contactFirstNameID)
+	a.lastLabel = a.control("STATIC", "Last name", 0, 0, 0)
+	a.lastName = a.control("EDIT", "", wsTab|0x80, 0x200, contactLastNameID)
 	a.addMember = a.control("BUTTON", "Add to list", wsTab, 0, addContactID)
 	a.removeMember = a.control("BUTTON", "Remove from list", wsTab, 0, removeContactID)
 	a.unsubscribe = a.control("BUTTON", "Unsubscribe email…", wsTab, 0, unsubscribeContactID)
@@ -74,16 +81,21 @@ func (a *application) layoutContacts(set func(uintptr, int, int, int, int), widt
 	set(a.emailField, 16, 257-top, width-350, 40)
 	set(a.find, width-322, 257-top, 134, 40)
 	set(a.search, width-178, 257-top, 162, 40)
+	half := (width - 48) / 2
+	set(a.firstLabel, 16, 310-top, half, 35)
+	set(a.lastLabel, 32+half, 310-top, half, 35)
+	set(a.firstName, 16, 345-top, half, 40)
+	set(a.lastName, 32+half, 345-top, half, 40)
 	buttonWidth := (width - 56) / 3
-	set(a.addMember, 16, 310-top, buttonWidth, 42)
-	set(a.removeMember, 28+buttonWidth, 310-top, buttonWidth, 42)
-	set(a.unsubscribe, 40+2*buttonWidth, 310-top, buttonWidth, 42)
+	set(a.addMember, 16, 399-top, buttonWidth, 42)
+	set(a.removeMember, 28+buttonWidth, 399-top, buttonWidth, 42)
+	set(a.unsubscribe, 40+2*buttonWidth, 399-top, buttonWidth, 42)
 	detailsWidth := width - 32
 	if len(a.matches) > 0 {
 		detailsWidth = (width - 48) / 2
-		set(a.matchesList, 32+detailsWidth, 365-top, detailsWidth, height-381+top)
+		set(a.matchesList, 32+detailsWidth, 454-top, detailsWidth, height-470+top)
 	}
-	set(a.contactDetails, 16, 365-top, detailsWidth, height-381+top)
+	set(a.contactDetails, 16, 454-top, detailsWidth, height-470+top)
 }
 
 func (a *application) updateContacts() {
@@ -92,7 +104,7 @@ func (a *application) updateContacts() {
 		visible = 5
 	}
 	for _, control := range []uintptr{a.contactListLabel, a.contactLists, a.emailLabel,
-		a.emailField, a.find, a.search, a.addMember, a.removeMember, a.unsubscribe, a.contactDetails} {
+		a.emailField, a.find, a.search, a.firstLabel, a.firstName, a.lastLabel, a.lastName, a.addMember, a.removeMember, a.unsubscribe, a.contactDetails} {
 		show.Call(control, visible)
 	}
 	show.Call(a.matchesList, 0)
@@ -102,6 +114,14 @@ func (a *application) updateContacts() {
 	ready := a.managing && a.path != "" && !a.busy
 	listID, _ := a.contactList()
 	onList := a.selectedContact.onList(listID)
+	hasName := a.selectedContact.name() != ""
+	enterName := ready && a.contactChecked && !hasName
+	canAdd := ready && a.contactChecked && (!onList || !hasName) && (hasName || a.enteredContactName().full() != "")
+	label := "Add to list"
+	if onList && !hasName {
+		label = "Save name"
+	}
+	caption(a.addMember, label)
 	for _, control := range []struct {
 		handle uintptr
 		active bool
@@ -111,7 +131,7 @@ func (a *application) updateContacts() {
 		{a.matchesList, ready},
 		{a.search, ready && listID > 0 && strings.TrimSpace(value(a.emailField)) != ""},
 		{a.find, ready && listID > 0 && contactEmail(strings.TrimSpace(value(a.emailField)))},
-		{a.addMember, ready && a.contactChecked && !onList},
+		{a.addMember, canAdd}, {a.firstName, enterName}, {a.lastName, enterName},
 		{a.removeMember, ready && a.contactChecked && onList},
 		{a.unsubscribe, ready && a.contactChecked && onList && !a.selectedContact.EmailBlacklisted},
 	} {
@@ -152,9 +172,15 @@ func (a *application) clearMatches() {
 	a.layout()
 }
 
+func (a *application) enteredContactName() contactName {
+	return contactName{first: value(a.firstName), last: value(a.lastName)}
+}
+
 func (a *application) clearContact() {
 	a.contactChecked = false
 	a.selectedContact = listContact{}
+	caption(a.firstName, "")
+	caption(a.lastName, "")
 	prompt := "Choose a mailing list. Search by name or look up an exact email address."
 	if a.path == "" {
 		prompt = "Select a valid account profile."
@@ -178,6 +204,8 @@ func (a *application) contactCommand(id, notification uintptr) bool {
 			a.clearContact()
 			a.updateContacts()
 		}
+	case (id == contactFirstNameID || id == contactLastNameID) && notification == 0x300:
+		a.updateContacts()
 	case id == searchContactsID && notification == 0:
 		a.searchContacts()
 	case id == contactMatchesID && notification == 1 && !a.busy:
@@ -210,13 +238,21 @@ func (a *application) runContact(action contactAction) {
 	if action != lookupContact && !a.contactChecked {
 		return
 	}
+	name := a.enteredContactName()
 	var confirmation string
 	switch action {
 	case addContact:
-		if onList {
+		if selected.name() != "" {
+			name = selected.nameParts()
+		}
+		if name.full() == "" || (onList && selected.name() != "") {
 			return
 		}
-		confirmation = fmt.Sprintf("Add %s to %s? Confirm that the contact has agreed to receive mail from this list.", email, label)
+		if onList {
+			confirmation = fmt.Sprintf("Save %s as the name for %s?", name.full(), email)
+		} else {
+			confirmation = fmt.Sprintf("Add %s (%s) to %s? Confirm that the contact has agreed to receive mail from this list.", name.full(), email, label)
+		}
 	case removeContact:
 		if !onList {
 			return
@@ -242,7 +278,7 @@ func (a *application) runContact(action contactAction) {
 		client := newBrevoClient()
 		result := contactResult{action: action}
 		if action != lookupContact {
-			result.err = client.changeContact(ctx, key, email, listID, action, selected)
+			result.err = client.changeContact(ctx, key, email, listID, action, selected, name)
 		}
 		if result.err == nil {
 			result.contact, result.refreshErr = client.findContact(ctx, key, email)
@@ -273,8 +309,11 @@ func (a *application) finishContact(result contactResult) {
 	}
 	contact := result.contact
 	a.selectedContact, a.contactChecked = contact, true
+	name := contact.nameParts()
+	caption(a.firstName, name.first)
+	caption(a.lastName, name.last)
 	if contact.ID == 0 {
-		caption(a.contactDetails, "No contact found for this email address. Add to list will create the contact.")
+		caption(a.contactDetails, "No contact found. Enter a first or last name, then click Add to list.")
 		return
 	}
 	listID, label := a.contactList()
