@@ -22,9 +22,15 @@ const (
 	contactMatchesID
 	contactFirstNameID
 	contactLastNameID
+	listMembersID
+	previousMembersID
+	nextMembersID
 )
 
 type contactsUI struct {
+	listMembers, previousMembers, nextMembers, memberRange               uintptr
+	browsingMembers, hasNextMembers                                      bool
+	memberOffset                                                         int
 	firstLabel, firstName, lastLabel, lastName                           uintptr
 	switchScreen, contactListLabel, contactLists, emailLabel, emailField uintptr
 	find, addMember, removeMember, unsubscribe, contactDetails           uintptr
@@ -37,12 +43,14 @@ type contactsUI struct {
 }
 
 type contactResult struct {
-	contact    listContact
-	action     contactAction
-	err        error
-	refreshErr error
-	searching  bool
-	matches    []listContact
+	memberPage, hasNextMembers bool
+	memberOffset               int
+	contact                    listContact
+	action                     contactAction
+	err                        error
+	refreshErr                 error
+	searching                  bool
+	matches                    []listContact
 }
 
 func (a *application) initContacts() {
@@ -65,6 +73,10 @@ func (a *application) initContacts() {
 	a.addMember = a.control("BUTTON", "Add to list", wsTab, 0, addContactID)
 	a.removeMember = a.control("BUTTON", "Remove from list", wsTab, 0, removeContactID)
 	a.unsubscribe = a.control("BUTTON", "Unsubscribe email…", wsTab, 0, unsubscribeContactID)
+	a.listMembers = a.control("BUTTON", "List members", wsTab, 0, listMembersID)
+	a.previousMembers = a.control("BUTTON", "Previous", wsTab, 0, previousMembersID)
+	a.nextMembers = a.control("BUTTON", "Next", wsTab, 0, nextMembersID)
+	a.memberRange = a.control("STATIC", "", 0, 0, 0)
 	a.contactDetails = a.control("EDIT", "", wsTab|0x00200844, 0x200, 0)
 }
 
@@ -90,12 +102,16 @@ func (a *application) layoutContacts(set func(uintptr, int, int, int, int), widt
 	set(a.addMember, 16, 399-top, buttonWidth, 42)
 	set(a.removeMember, 28+buttonWidth, 399-top, buttonWidth, 42)
 	set(a.unsubscribe, 40+2*buttonWidth, 399-top, buttonWidth, 42)
+	set(a.listMembers, 16, 452-top, 190, 40)
+	set(a.previousMembers, 218, 452-top, 130, 40)
+	set(a.nextMembers, 360, 452-top, 105, 40)
+	set(a.memberRange, 477, 458-top, width-493, 34)
 	detailsWidth := width - 32
 	if len(a.matches) > 0 {
 		detailsWidth = (width - 48) / 2
-		set(a.matchesList, 32+detailsWidth, 454-top, detailsWidth, height-470+top)
+		set(a.matchesList, 32+detailsWidth, 505-top, detailsWidth, height-521+top)
 	}
-	set(a.contactDetails, 16, 454-top, detailsWidth, height-470+top)
+	set(a.contactDetails, 16, 505-top, detailsWidth, height-521+top)
 }
 
 func (a *application) updateContacts() {
@@ -104,7 +120,7 @@ func (a *application) updateContacts() {
 		visible = 5
 	}
 	for _, control := range []uintptr{a.contactListLabel, a.contactLists, a.emailLabel,
-		a.emailField, a.find, a.search, a.firstLabel, a.firstName, a.lastLabel, a.lastName, a.addMember, a.removeMember, a.unsubscribe, a.contactDetails} {
+		a.emailField, a.find, a.search, a.listMembers, a.previousMembers, a.nextMembers, a.memberRange, a.firstLabel, a.firstName, a.lastLabel, a.lastName, a.addMember, a.removeMember, a.unsubscribe, a.contactDetails} {
 		show.Call(control, visible)
 	}
 	show.Call(a.matchesList, 0)
@@ -129,6 +145,9 @@ func (a *application) updateContacts() {
 		{a.switchScreen, a.review == nil && !a.busy},
 		{a.contactLists, ready}, {a.emailField, ready},
 		{a.matchesList, ready},
+		{a.listMembers, ready && listID > 0},
+		{a.previousMembers, ready && a.browsingMembers && a.memberOffset > 0},
+		{a.nextMembers, ready && a.browsingMembers && a.hasNextMembers},
 		{a.search, ready && listID > 0 && strings.TrimSpace(value(a.emailField)) != ""},
 		{a.find, ready && listID > 0 && contactEmail(strings.TrimSpace(value(a.emailField)))},
 		{a.addMember, canAdd}, {a.firstName, enterName}, {a.lastName, enterName},
@@ -167,6 +186,8 @@ func (a *application) resetContactLists() {
 }
 
 func (a *application) clearMatches() {
+	a.browsingMembers, a.hasNextMembers, a.memberOffset = false, false, 0
+	caption(a.memberRange, "")
 	a.matches = nil
 	send.Call(a.matchesList, 0x184, 0, 0) // LB_RESETCONTENT
 	a.layout()
@@ -206,6 +227,12 @@ func (a *application) contactCommand(id, notification uintptr) bool {
 		}
 	case (id == contactFirstNameID || id == contactLastNameID) && notification == 0x300:
 		a.updateContacts()
+	case id == listMembersID && notification == 0:
+		a.loadMemberPage(0)
+	case id == previousMembersID && notification == 0 && a.browsingMembers && a.memberOffset > 0:
+		a.loadMemberPage(a.memberOffset - memberPageSize)
+	case id == nextMembersID && notification == 0 && a.browsingMembers && a.hasNextMembers:
+		a.loadMemberPage(a.memberOffset + memberPageSize)
 	case id == searchContactsID && notification == 0:
 		a.searchContacts()
 	case id == contactMatchesID && notification == 1 && !a.busy:
@@ -214,6 +241,12 @@ func (a *application) contactCommand(id, notification uintptr) bool {
 			a.choosingMatch = true
 			caption(a.emailField, a.matches[index].Email)
 			a.choosingMatch = false
+			if a.matches[index].Email == "" {
+				a.clearContact()
+				caption(a.contactDetails, a.matches[index].name()+"\r\nNo email address on file.")
+				a.update()
+				return true
+			}
 			a.runContact(lookupContact)
 		}
 	case id >= findContactID && id <= unsubscribeContactID && notification == 0:
@@ -291,6 +324,10 @@ func (a *application) runContact(action contactAction) {
 func (a *application) finishContact(result contactResult) {
 	a.busy = false
 	defer a.update()
+	if result.memberPage {
+		a.showMemberPage(result)
+		return
+	}
 	if result.searching {
 		a.showMatches(result)
 		return
@@ -365,16 +402,64 @@ func (a *application) showMatches(result contactResult) {
 		caption(a.contactDetails, "Search failed. "+result.err.Error())
 		return
 	}
-	a.matches = result.matches
-	if len(a.matches) == 0 {
+	if len(result.matches) == 0 {
 		caption(a.contactDetails, "No matching names on this list.")
 		return
 	}
-	for _, contact := range a.matches {
-		label := wide(contact.name() + " (" + contact.Email + ")")
+	a.populateMatches(result.matches)
+	caption(a.contactDetails, fmt.Sprintf("Matches: %d. Select a contact to review their details.", len(a.matches)))
+}
+
+func (a *application) populateMatches(matches []listContact) {
+	a.matches = matches
+	send.Call(a.matchesList, 0x184, 0, 0) // LB_RESETCONTENT
+	for _, contact := range matches {
+		email := contact.Email
+		if email == "" {
+			email = "no email address"
+		}
+		label := wide(strings.TrimSpace(contact.name() + " (" + email + ")"))
 		send.Call(a.matchesList, 0x180, 0, ptr(label)) // LB_ADDSTRING
 		runtime.KeepAlive(label)
 	}
 	a.layout()
-	caption(a.contactDetails, fmt.Sprintf("Matches: %d. Select a contact to review their details.", len(a.matches)))
+}
+
+func (a *application) loadMemberPage(offset int) {
+	if !a.managing || a.busy || a.path == "" {
+		return
+	}
+	listID, _ := a.contactList()
+	if listID <= 0 {
+		return
+	}
+	key, window, done := a.profile.APIKey, a.window, a.contactDone
+	a.busy = true
+	caption(a.emailField, "")
+	a.clearContact()
+	caption(a.contactDetails, "Loading list members…")
+	a.update()
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		matches, next, err := newBrevoClient().listMemberPage(ctx, key, strconv.FormatInt(listID, 10), offset)
+		done <- contactResult{memberPage: true, memberOffset: offset, hasNextMembers: next, matches: matches, err: err}
+		post.Call(window, wmContactResult, 0, 0)
+	}()
+}
+
+func (a *application) showMemberPage(result contactResult) {
+	if result.err != nil {
+		caption(a.contactDetails, "Could not load list members. "+result.err.Error())
+		return
+	}
+	a.browsingMembers, a.memberOffset, a.hasNextMembers = true, result.memberOffset, result.hasNextMembers
+	a.populateMatches(result.matches)
+	if len(result.matches) == 0 {
+		caption(a.memberRange, "")
+		caption(a.contactDetails, "No members on this page.")
+		return
+	}
+	caption(a.memberRange, fmt.Sprintf("Members %d–%d", result.memberOffset+1, result.memberOffset+len(result.matches)))
+	caption(a.contactDetails, "Select a member to review their details.")
 }
