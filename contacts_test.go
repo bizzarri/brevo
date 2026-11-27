@@ -108,3 +108,34 @@ func TestAddContactRequiresNameAndEmail(t *testing.T) {
 		t.Fatal("accepted missing name")
 	}
 }
+
+func TestListMemberPage(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/contacts/lists/7/contacts" || r.URL.Query().Get("limit") != "21" {
+			t.Errorf("unexpected request: %s", r.URL)
+		}
+		var contacts []listContact
+		switch r.URL.Query().Get("offset") {
+		case "0":
+			for id := int64(1); id <= 21; id++ {
+				contacts = append(contacts, listContact{ID: id})
+			}
+		case "20":
+			contacts = []listContact{{ID: 21}}
+		default:
+			t.Errorf("unexpected offset: %s", r.URL)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"contacts": contacts})
+	}))
+	defer server.Close()
+
+	client := brevoClient{base: server.URL + "/", http: server.Client()}
+	first, next, err := client.listMemberPage(context.Background(), "test-key", "7", 0)
+	if err != nil || !next || len(first) != 20 || first[19].ID != 20 {
+		t.Fatalf("unexpected first page: %d members, next=%t, error=%v", len(first), next, err)
+	}
+	last, next, err := client.listMemberPage(context.Background(), "test-key", "7", 20)
+	if err != nil || next || len(last) != 1 || last[0].ID != 21 {
+		t.Fatalf("unexpected final page: %d members, next=%t, error=%v", len(last), next, err)
+	}
+}

@@ -82,8 +82,9 @@ Managing mailing lists
 
 Open Brevo-List-Manager.exe from the same folder as your Club Mail
 profile JSON, or click Manage mailing lists in Club Mail. Choose an
-account profile and mailing list. Enter part of a name and click Search, then select a
-match. You can also enter an exact email address and click Look up.
+account profile and mailing list. Click List members to browse 20 at a
+time with Previous and Next. Select a member to see their details.
+Enter part of a name and click Search to find a specific member. You can also enter an exact email address and click Look up.
 The contact details show list membership and email subscription status.
 
 To add someone, enter their email address and click Look up. Enter

@@ -126,19 +126,36 @@ func (c brevoClient) searchListContacts(ctx context.Context, key string, listID 
 	}), nil
 }
 
+const memberPageSize = 20
+
+func (c brevoClient) listMemberPage(ctx context.Context, key, listID string, offset int) ([]listContact, bool, error) {
+	contacts, err := c.fetchContactPage(ctx, key, listID, offset, memberPageSize+1)
+	if err != nil {
+		return nil, false, err
+	}
+	hasNext := len(contacts) > memberPageSize
+	return contacts[:min(len(contacts), memberPageSize)], hasNext, nil
+}
+
+func (c brevoClient) fetchContactPage(ctx context.Context, key, listID string, offset, limit int) ([]listContact, error) {
+	var page struct {
+		Contacts []listContact
+	}
+	endpoint := fmt.Sprintf("contacts/lists/%s/contacts?limit=%d&offset=%d", listID, limit, offset)
+	err := c.request(ctx, key, http.MethodGet, endpoint, nil, &page)
+	return page.Contacts, err
+}
+
 func (c brevoClient) listContacts(ctx context.Context, key, listID string) ([]listContact, error) {
 	const pageSize = 500
 	var contacts []listContact
 	for offset := 0; ; offset += pageSize {
-		var page struct {
-			Contacts []listContact
-		}
-		endpoint := fmt.Sprintf("contacts/lists/%s/contacts?limit=%d&offset=%d", listID, pageSize, offset)
-		if err := c.request(ctx, key, http.MethodGet, endpoint, nil, &page); err != nil {
+		page, err := c.fetchContactPage(ctx, key, listID, offset, pageSize)
+		if err != nil {
 			return nil, err
 		}
-		contacts = append(contacts, page.Contacts...)
-		if len(page.Contacts) < pageSize {
+		contacts = append(contacts, page...)
+		if len(page) < pageSize {
 			return contacts, nil
 		}
 	}
